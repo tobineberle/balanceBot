@@ -110,23 +110,20 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   //Motor Configuration
-//   motA = A4988_init(GPIOA, GPIO_PIN_4, LINEAR_SPEED);
-//   A4988_timer_init(&motA, TIM2, 1, TIM2_IRQn, HAL_RCC_GetPCLK1Freq());
-//   A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);
-//   A4988_setRPM(&motA, 100);
-//   A4988_setMicrostepResolution(&motA, QUARTER);
-//   A4988_setAccel(&motA, 2000);
-//   A4988_setDecel(&motA, 2000);
-//
-//   motB = A4988_init(GPIOC, GPIO_PIN_1, LINEAR_SPEED);
-//   A4988_timer_init(&motB, TIM3, 1, TIM3_IRQn, HAL_RCC_GetPCLK1Freq());
-//   A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
-//   A4988_setRPM(&motB, 100);
-//   A4988_setMicrostepResolution(&motB, QUARTER);
-//   A4988_setAccel(&motB, 2000);
-//   A4988_setDecel(&motB, 2000);
+   motA = A4988_init(GPIOA, GPIO_PIN_4, CONTINUOUS_SPEED);
+   A4988_timer_init(&motA, TIM2, 1, TIM2_IRQn, HAL_RCC_GetPCLK1Freq());
+   A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);
+   A4988_setRPM(&motA, 100);
+   A4988_setMicrostepResolution(&motA, QUARTER);
 
-   //MPU Configuration
+   motB = A4988_init(GPIOC, GPIO_PIN_1, CONTINUOUS_SPEED);
+   A4988_timer_init(&motB, TIM3, 1, TIM3_IRQn, HAL_RCC_GetPCLK1Freq());
+   A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
+   A4988_setRPM(&motB, 100);
+   A4988_setMicrostepResolution(&motB, QUARTER);
+
+
+//   MPU Configuration
    MPU6050_TypeDef mpu;
    MPU6050_init(&mpu, &hi2c1, A2G, G250DPS);
    uint16_t t_us;
@@ -136,17 +133,43 @@ int main(void)
 
    //Start timer 1
    HAL_TIM_Base_Start(&htim1);
-   printf("Y ANGLE ACCEL, Y ANGLE GYRO FUNC, Y ANGLE GYRO CALC,  Y ANGLE KALMAN\n");
+
+
+   for(int i = 0; i < 5; i++){
+	   	   A4988_run(&motA, 800);
+		   A4988_run(&motB, 800);
+		   HAL_Delay(2000);
+		   A4988_run(&motA, 400);
+		   A4988_run(&motB, 400);
+		   HAL_Delay(2000);
+
+//		   A4988_move(&motA, 800);
+// 		   A4988_move(&motB, 800);
+//   		   HAL_Delay(2000);
+//   		   A4988_move(&motA, 400);
+//   		   A4988_move(&motB, 400);
+//   		   HAL_Delay(2000);
+   }
+   A4988_run(&motA, 0);
+   A4988_run(&motB, 0);
 
    while(1){
-	   y_angle = MPU6050_getAccAngleDegY(&mpu);
-	   t_us = __HAL_TIM_GET_COUNTER(&htim1);
-	   y_angle_gyro += MPU6050_getGyroAngleDegX(&mpu, t_us);
-	   kal_angle = MPU6050_getKalmanAngleDeg(&mpu, t_us, y_angle, MPU6050_getGyroX(&mpu));
-	   __HAL_TIM_SET_COUNTER(&htim1, 0);
-	   printf("%f,%f,%f\n",y_angle, y_angle_gyro, kal_angle);
-	   HAL_Delay(5);
-    }
+
+   }
+
+//   while(1){
+//	   printf("%i", A4988_getState(&motA));
+//	   A4988_run(&motB, 800);
+//	   y_angle = MPU6050_getAccAngleDegY(&mpu);
+//	   t_us = __HAL_TIM_GET_COUNTER(&htim1);
+//	   y_angle_gyro += MPU6050_getGyroAngleDegX(&mpu, t_us);
+//	   kal_angle = MPU6050_getKalmanAngleDeg(&mpu, t_us, y_angle, MPU6050_getGyroX(&mpu));
+//	   __HAL_TIM_SET_COUNTER(&htim1, 0);
+//	   printf("%f,%f,%f\n",y_angle, y_angle_gyro, kal_angle);
+//	   HAL_Delay(5000);
+//	   A4988_run(&motA, 400);
+//	   HAL_Delay(5000);
+//    }
 
   /* USER CODE END 2 */
 

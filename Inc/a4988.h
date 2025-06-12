@@ -41,12 +41,13 @@
 
 #define STABILIZE_TIME		10
 #define MIN_PULSE_LENGTH	10	//[us], note 1us min pulse length minimum, we give 10 for margin
+#define MAX_RPM				100
 #define MIN(a,b)			(b < a ? b : a)
 #define MAX(a,b)			(b > a ? b : a)
 
 enum Direction {FORWARD, BACKWARD};
 enum State {IDLE, RUNNING, SLEEPING, STABILIZING};
-enum Mode {CONSTANT_SPEED, LINEAR_SPEED};
+enum Mode {CONSTANT_SPEED, LINEAR_SPEED, CONTINUOUS_SPEED};
 enum MotionState {ACCEL, CRUISE, DECEL};
 typedef enum {FULL, HALF, QUARTER, EIGHTH, SIXTEENTH} A4988_Resolution_e;
 
@@ -129,6 +130,9 @@ uint32_t _A4988_computeArrFromRPM(A4988_t* motor, uint16_t rpm);
 uint32_t _A4988_computeArrFromSpS2(A4988_t* motor, uint16_t deltaSteps, uint16_t rate);
 void _A4988_setARR(A4988_t* motor, uint32_t arr);
 void _A4988_setMotionState(A4988_t* motor, uint8_t motionState);
+uint32_t _A4988_computeArrFromSpS(A4988_t* motor, uint16_t sps);
+void _A4988_forceToggleMode(A4988_t* motor);
+
 
 //Public
 void A4988_IRQ_Handler(A4988_t* motor);
@@ -147,6 +151,8 @@ A4988_Resolution_e A4988_getMicrostepResolution(A4988_t* motor);
 void A4988_setAccel(A4988_t* motor, uint16_t accel);
 void A4988_setDecel(A4988_t* motor, uint16_t decel);
 void A4988_setLinearSpeedProfile(A4988_t* motor, SpeedProfile_t profile);
+void A4988_run(A4988_t* motor, int16_t rpm);
+
 
 //TODO
 //void A4988_nextAngleDegCommand(A4988_t* motor, int32_t angle);

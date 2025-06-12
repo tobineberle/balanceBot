@@ -90,8 +90,8 @@ float PID_update(PID_t* pid, float currentVal, float t_us)
 	pid->prevError = error;
 
 	error = p + i + d;
-	error = error > pid->outputLimitMax ? outputLimitMax : error;
-	error = error < pid->outputLimitMin ? outputLimitMin : error;
+	error = error > pid->outputLimitMax ? pid->outputLimitMax : error;
+	error = error < pid->outputLimitMin ? pid->outputLimitMin : error;
 
 	return error;
 }
