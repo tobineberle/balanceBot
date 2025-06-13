@@ -55,6 +55,7 @@ TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 A4988_t motA;
 A4988_t motB;
+MPU6050_t mpu;
 
 /* USER CODE END PV */
 
@@ -110,50 +111,45 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   //Motor Configuration
-   motA = A4988_init(GPIOA, GPIO_PIN_4, CONTINUOUS_SPEED);
-   A4988_timer_init(&motA, TIM2, 1, TIM2_IRQn, HAL_RCC_GetPCLK1Freq());
-   A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);
-   A4988_setRPM(&motA, 100);
-   A4988_setMicrostepResolution(&motA, QUARTER);
+  A4988_init(&motA, GPIOA, GPIO_PIN_4, LINEAR_SPEED);
+  A4988_timer_init(&motA, TIM2, 1, TIM2_IRQn, HAL_RCC_GetPCLK1Freq());
+  A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);   A4988_setMicrostepResolution(&motA, QUARTER);
+  A4988_setRPM(&motA, 80);
+  A4988_init(&motB, GPIOC, GPIO_PIN_1, LINEAR_SPEED);
+  A4988_timer_init(&motB, TIM3, 1, TIM3_IRQn, HAL_RCC_GetPCLK1Freq());   A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
+  A4988_setMicrostepResolution(&motB, QUARTER);
+  A4988_setRPM(&motB, 80);
 
-   motB = A4988_init(GPIOC, GPIO_PIN_1, CONTINUOUS_SPEED);
-   A4988_timer_init(&motB, TIM3, 1, TIM3_IRQn, HAL_RCC_GetPCLK1Freq());
-   A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
-   A4988_setRPM(&motB, 100);
-   A4988_setMicrostepResolution(&motB, QUARTER);
-
-
-//   MPU Configuration
-   MPU6050_TypeDef mpu;
-   MPU6050_init(&mpu, &hi2c1, A2G, G250DPS);
-   uint16_t t_us;
-   float y_angle;
-   float y_angle_gyro = 0;
-   float kal_angle;
+  //MPU Configuration
+  MPU6050_init(&mpu, &hi2c1, A2G, G250DPS);
+  uint16_t t_us;
+  float y_angle;
+  float y_angle_gyro = 0;
+  float kal_angle;
 
    //Start timer 1
-   HAL_TIM_Base_Start(&htim1);
+//   HAL_TIM_Base_Start(&htim1);
 
+//	HAL_TIM_Base_Start(&htim1);
 
-   for(int i = 0; i < 5; i++){
-	   	   A4988_run(&motA, 800);
-		   A4988_run(&motB, 800);
-		   HAL_Delay(2000);
-		   A4988_run(&motA, 400);
-		   A4988_run(&motB, 400);
-		   HAL_Delay(2000);
-
-//		   A4988_move(&motA, 800);
-// 		   A4988_move(&motB, 800);
-//   		   HAL_Delay(2000);
-//   		   A4988_move(&motA, 400);
-//   		   A4988_move(&motB, 400);
-//   		   HAL_Delay(2000);
+  for(int i = 0; i < 3; i++){
+	   printf("\nLOOP %d\n", i);
+//	   	   __HAL_TIM_SET_COUNTER(&htim1, 0);
+	   A4988_move(&motA, -200);
+	   A4988_move(&motB, -200);
+	   HAL_Delay(5000);
+	   A4988_move(&motA, 400);
+	   A4988_move(&motB, 400);
+//		   printf("RUN: %u\n",__HAL_TIM_GET_COUNTER(&htim1));
+	   HAL_Delay(5000);
+	   A4988_move(&motA, 800);
+	   A4988_move(&motB, 800);
+	   HAL_Delay(5000);
    }
-   A4988_run(&motA, 0);
-   A4988_run(&motB, 0);
+  A4988_run(&motA, 0);
+  A4988_run(&motB, 0);
 
-   while(1){
+  while(1){
 
    }
 

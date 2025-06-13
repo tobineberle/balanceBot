@@ -73,7 +73,7 @@ typedef struct
 	//Kalman Filter variables
 	float sNoise; //[deg]
 	float kGain;
-}kalman1D_TypeDef;
+}kalman1D_t;
 
 typedef struct
 {
@@ -82,31 +82,31 @@ typedef struct
 	float accelScale;
 	Gyro_Resolution_e gyroResolution;
 	float gyroScale;
-	kalman1D_TypeDef kalmanFilter;
+	kalman1D_t kalmanFilter;
 
-}MPU6050_TypeDef;
+}MPU6050_t;
 
 //Public
-void MPU6050_init(MPU6050_TypeDef* mpu, I2C_HandleTypeDef* hi2cx, Accel_Resolution_e gyroMode, Gyro_Resolution_e accelMode);
-Accel_Resolution_e MPU6050_getGyroResolution(MPU6050_TypeDef* mpu);
-bool MPU6050_setAccelResolution(MPU6050_TypeDef* mpu, Accel_Resolution_e resolution);
-Gyro_Resolution_e MPU6050_getAccelResolution(MPU6050_TypeDef* mpu);
-bool MPU6050_setGyroResolution(MPU6050_TypeDef* mpu, Gyro_Resolution_e resolution);
-float MPU6050_getAccX(MPU6050_TypeDef* mpu);
-float MPU6050_getAccY(MPU6050_TypeDef* mpu);
-float MPU6050_getAccZ(MPU6050_TypeDef* mpu);
-float MPU6050_getGyroX(MPU6050_TypeDef* mpu);
-float MPU6050_getGyroY(MPU6050_TypeDef* mpu);
-float MPU6050_getGyroZ(MPU6050_TypeDef* mpu);
-float MPU6050_getAccAngleDegX(MPU6050_TypeDef* mpu);
-float MPU6050_getAccAngleDegY(MPU6050_TypeDef* mpu);
-float MPU6050_getAccAngleDegZ(MPU6050_TypeDef* mpu);
-float MPU6050_getGyroAngleDegX(MPU6050_TypeDef* mpu, uint16_t dt_us);
-float MPU6050_getGyroAngleDegY(MPU6050_TypeDef* mpu, uint16_t dt_us);
-float MPU6050_getGyroAngleDegZ(MPU6050_TypeDef* mpu, uint16_t dt_us);
-float MPU6050_getKalmanAngleDeg(MPU6050_TypeDef* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity);
+void MPU6050_init(MPU6050_t* mpu, I2C_HandleTypeDef* hi2cx, Accel_Resolution_e gyroMode, Gyro_Resolution_e accelMode);
+Accel_Resolution_e MPU6050_getGyroResolution(MPU6050_t* mpu);
+bool MPU6050_setAccelResolution(MPU6050_t* mpu, Accel_Resolution_e resolution);
+Gyro_Resolution_e MPU6050_getAccelResolution(MPU6050_t* mpu);
+bool MPU6050_setGyroResolution(MPU6050_t* mpu, Gyro_Resolution_e resolution);
+float MPU6050_getAccX(MPU6050_t* mpu);
+float MPU6050_getAccY(MPU6050_t* mpu);
+float MPU6050_getAccZ(MPU6050_t* mpu);
+float MPU6050_getGyroX(MPU6050_t* mpu);
+float MPU6050_getGyroY(MPU6050_t* mpu);
+float MPU6050_getGyroZ(MPU6050_t* mpu);
+float MPU6050_getAccAngleDegX(MPU6050_t* mpu);
+float MPU6050_getAccAngleDegY(MPU6050_t* mpu);
+float MPU6050_getAccAngleDegZ(MPU6050_t* mpu);
+float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_us);
+float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_us);
+float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_us);
+float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity);
 
 //Private
-void _MPU6050_init_kalman(MPU6050_TypeDef* mpu, float angle, float angle_covar, float p_noise, float s_noise);
+void _MPU6050_init_kalman(MPU6050_t* mpu, float angle, float angle_covar, float p_noise, float s_noise);
 
 #endif /*INC_MPU6050_H_*/

@@ -1,6 +1,6 @@
 #include <mpu6050.h>
 
-void MPU6050_init(MPU6050_TypeDef* mpu, I2C_HandleTypeDef* hi2cx, Accel_Resolution_e accelReso, Gyro_Resolution_e gyroReso){
+void MPU6050_init(MPU6050_t* mpu, I2C_HandleTypeDef* hi2cx, Accel_Resolution_e accelReso, Gyro_Resolution_e gyroReso){
 
 	  //Check MPU6050 connection over I2C
 	  HAL_StatusTypeDef conn = HAL_I2C_IsDeviceReady(hi2cx, (MPU6050_ADDRESS <<1) + 0, 1, 100);
@@ -21,7 +21,7 @@ void MPU6050_init(MPU6050_TypeDef* mpu, I2C_HandleTypeDef* hi2cx, Accel_Resoluti
 	  _MPU6050_init_kalman(mpu, 0, KALMAN_ANGULAR_COVAR, KALMAN_PNOISE, KALMAN_SNOISE);
 }
 
-bool MPU6050_setAccelResolution(MPU6050_TypeDef* mpu, Accel_Resolution_e resolution){
+bool MPU6050_setAccelResolution(MPU6050_t* mpu, Accel_Resolution_e resolution){
 	uint8_t accelFSMode;
 	 switch(resolution){
 		  case A2G:
@@ -53,7 +53,7 @@ bool MPU6050_setAccelResolution(MPU6050_TypeDef* mpu, Accel_Resolution_e resolut
 	  }
 }
 
-bool MPU6050_setGyroResolution(MPU6050_TypeDef* mpu, Gyro_Resolution_e resolution){
+bool MPU6050_setGyroResolution(MPU6050_t* mpu, Gyro_Resolution_e resolution){
 	uint8_t gyroFSMode;
 	  switch(resolution){
 		  case G250DPS:
@@ -85,7 +85,7 @@ bool MPU6050_setGyroResolution(MPU6050_TypeDef* mpu, Gyro_Resolution_e resolutio
 	}
 }
 
-float MPU6050_getAccX(MPU6050_TypeDef* mpu)
+float MPU6050_getAccX(MPU6050_t* mpu)
 {
 
 	uint8_t data[2];
@@ -95,7 +95,7 @@ float MPU6050_getAccX(MPU6050_TypeDef* mpu)
 	return (float)x_acc/mpu->accelScale;
 }
 
-float MPU6050_getAccY(MPU6050_TypeDef* mpu)
+float MPU6050_getAccY(MPU6050_t* mpu)
 {
 	uint8_t data[2];
 	int16_t y_acc;
@@ -104,7 +104,7 @@ float MPU6050_getAccY(MPU6050_TypeDef* mpu)
 	return (float)y_acc/mpu->accelScale;
 }
 
-float MPU6050_getAccZ(MPU6050_TypeDef* mpu)
+float MPU6050_getAccZ(MPU6050_t* mpu)
 {
 	uint8_t data[2];
 	int16_t z_acc;
@@ -113,7 +113,7 @@ float MPU6050_getAccZ(MPU6050_TypeDef* mpu)
 	return (float)z_acc/mpu->accelScale;
 }
 
-float MPU6050_getGyroX(MPU6050_TypeDef* mpu)
+float MPU6050_getGyroX(MPU6050_t* mpu)
 {
 	uint8_t data[2];
 	int16_t x_gyro;
@@ -122,7 +122,7 @@ float MPU6050_getGyroX(MPU6050_TypeDef* mpu)
 	return (float)x_gyro/mpu->gyroScale;
 }
 
-float MPU6050_getGyroY(MPU6050_TypeDef* mpu)
+float MPU6050_getGyroY(MPU6050_t* mpu)
 {
 	uint8_t data[2];
 	int16_t y_gyro;
@@ -131,7 +131,7 @@ float MPU6050_getGyroY(MPU6050_TypeDef* mpu)
 	return (float)y_gyro/mpu->gyroScale;
 }
 
-float MPU6050_getGyroZ(MPU6050_TypeDef* mpu)
+float MPU6050_getGyroZ(MPU6050_t* mpu)
 {
 	uint8_t data[2];
 	int16_t z_gyro;
@@ -140,7 +140,7 @@ float MPU6050_getGyroZ(MPU6050_TypeDef* mpu)
 	return (float)z_gyro/mpu->gyroScale;
 }
 
-float MPU6050_getAccAngleDegX(MPU6050_TypeDef* mpu)
+float MPU6050_getAccAngleDegX(MPU6050_t* mpu)
 {
 	float x =  MPU6050_getAccX(mpu);
 	float y =  MPU6050_getAccY(mpu);
@@ -148,7 +148,7 @@ float MPU6050_getAccAngleDegX(MPU6050_TypeDef* mpu)
 	return (float)atan(x/(sqrt(pow(y,2) + pow(z, 2))))*RAD_TO_DEG;
 }
 
-float MPU6050_getAccAngleDegY(MPU6050_TypeDef* mpu)
+float MPU6050_getAccAngleDegY(MPU6050_t* mpu)
 {
 	float x =  MPU6050_getAccX(mpu);
 	float y =  MPU6050_getAccY(mpu);
@@ -156,7 +156,7 @@ float MPU6050_getAccAngleDegY(MPU6050_TypeDef* mpu)
 	return (float)atan(y/(sqrt(pow(x,2) + pow(z, 2))))*RAD_TO_DEG;
 }
 
-float MPU6050_getAccAngleDegZ(MPU6050_TypeDef* mpu)
+float MPU6050_getAccAngleDegZ(MPU6050_t* mpu)
 {
 	float x =  MPU6050_getAccX(mpu);
 	float y =  MPU6050_getAccY(mpu);
@@ -164,7 +164,7 @@ float MPU6050_getAccAngleDegZ(MPU6050_TypeDef* mpu)
 	return (float)atan((sqrt(pow(x,2) + pow(y, 2))/z))*RAD_TO_DEG;
 }
 
-void _MPU6050_init_kalman(MPU6050_TypeDef* mpu, float angle, float angle_covar, float p_noise, float s_noise)
+void _MPU6050_init_kalman(MPU6050_t* mpu, float angle, float angle_covar, float p_noise, float s_noise)
 {
 	mpu->kalmanFilter.angle = angle;
 	mpu->kalmanFilter.angleCovar = angle_covar;
@@ -173,10 +173,10 @@ void _MPU6050_init_kalman(MPU6050_TypeDef* mpu, float angle, float angle_covar, 
 	mpu->kalmanFilter.kGain = 0;
 }
 
-float MPU6050_getKalmanAngleDeg(MPU6050_TypeDef* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity)
+float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity)
 {
 	float t_s = (float)US_TO_S(t_us);
-	kalman1D_TypeDef* k = &(mpu->kalmanFilter);
+	kalman1D_t* k = &(mpu->kalmanFilter);
 
 	/**
 	 * 1. a) State Equation
@@ -211,22 +211,25 @@ float MPU6050_getKalmanAngleDeg(MPU6050_TypeDef* mpu, uint16_t t_us, float measu
 	return k->angle;
 }
 
-float MPU6050_getGyroAngleDegX(MPU6050_TypeDef* mpu, uint16_t dt_us){
+float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_us){
 	float t_s = (float)US_TO_S(dt_us);
 	return (float)(MPU6050_getGyroX(mpu) * t_s);
 }
 
-float MPU6050_getGyroAngleDegY(MPU6050_TypeDef* mpu, uint16_t dt_us){
+float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_us){
 	float t_s = (float)US_TO_S(dt_us);
 	return (float)(MPU6050_getGyroY(mpu) * t_s);
 }
 
-float MPU6050_getGyroAngleDegZ(MPU6050_TypeDef* mpu, uint16_t dt_us){
+float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_us){
 	float t_s = (float)US_TO_S(dt_us);
 	return (float)(MPU6050_getGyroZ(mpu) * t_s);
 }
 
-//float _MPU6050_compensateAccelX(MPU6050_TypeDef* mpu, float accX, float gyroX, float gyroY, float gyroZ)
+/**
+ * DEFUNCT
+ */
+//float _MPU6050_compensateAccelX(MPU6050_t* mpu, float accX, float gyroX, float gyroY, float gyroZ)
 //{
 //    float a_centripetal_x =
 //        -gyroY * gyroY * mpu->xOffset +
@@ -236,7 +239,11 @@ float MPU6050_getGyroAngleDegZ(MPU6050_TypeDef* mpu, uint16_t dt_us){
 //
 //    return accX - a_centripetal_x;
 //}
-//float _MPU6050_compensateAccelY(MPU6050_TypeDef* mpu, float accY, float gyroX, float gyroY, float gyroZ)
+
+/**
+ * DEFUNCT
+ */
+//float _MPU6050_compensateAccelY(MPU6050_t* mpu, float accY, float gyroX, float gyroY, float gyroZ)
 //{
 //    float a_centripetal_y =
 //        -gyroX * gyroY * mpu->xOffset -
@@ -246,7 +253,11 @@ float MPU6050_getGyroAngleDegZ(MPU6050_TypeDef* mpu, uint16_t dt_us){
 //
 //    return accY - a_centripetal_y;
 //}
-//float _MPU6050_compensateAccelZ(MPU6050_TypeDef* mpu,float accZ, float gyroX, float gyroY, float gyroZ)
+
+/**
+ * DEFUNCT
+ */
+//float _MPU6050_compensateAccelZ(MPU6050_t* mpu,float accZ, float gyroX, float gyroY, float gyroZ)
 //{
 //    float a_centripetal_z =
 //         gyroX * gyroZ * mpu->xOffset +

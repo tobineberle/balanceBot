@@ -1,4 +1,4 @@
-	/*
+/*
  * A4988.c
  *
  *  Created on: Jun 2, 2025
@@ -16,28 +16,39 @@
  * @param	mode can be either CONSTANT_SPEED or LINEAR_SPEED
  * @retval	An initialized motor object
  */
-A4988_t A4988_init(GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t mode)
+void A4988_init(A4988_t* motor, GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t mode)
 {
-	A4988_t motor;
 	//Pins
-	motor._dirPort = dirPort;
-	motor._dirPin = dirPin;
+	motor->_dirPort = dirPort;
+	motor->_dirPin = dirPin;
 	//Default no microstepping
-	motor._microStepsPerRev = 200;
-	motor._rpm = 100;
-	motor._resolution = FULL;
-	motor._state = IDLE;
-	motor._stabilizeCounter = 0;
-	motor._position = 0;
-	motor._totalSteps = 0;
-	motor._stepsRemaining = 0;
-	motor._accelSteps = 0;
-	motor._decelSteps = 0;
-	motor._cruiseSteps = 0;
-	motor._speedProfile._mode = mode;
-	motor._speedProfile._accelRate = 500;
-	motor._speedProfile._decelRate = 500;
-	return motor;
+	motor->_microStepsPerRev = 200;
+	motor->_rpm = 100;
+	motor->_resolution = FULL;
+	motor->_state = IDLE;
+	motor->_stabilizeCounter = 0;
+	motor->_position = 0;
+	motor->_totalSteps = 0;
+	motor->_stepsRemaining = 0;
+	motor->_accelSteps = 0;
+	motor->_decelSteps = 0;
+	motor->_cruiseSteps = 0;
+	motor->_speedProfile._mode = mode;
+	motor->_speedProfile._accelRate = 500;
+	motor->_speedProfile._decelRate = 500;
+
+	switch(mode){
+	case CONSTANT_SPEED:
+		motor->_irqHandler = _A4988_IRQ_constantSpeed;
+		break;
+	case LINEAR_SPEED:
+		motor->_irqHandler = _A4988_IRQ_linearSpeed;
+		break;
+	case CONTINUOUS_SPEED:
+		motor->_irqHandler = _A4988_IRQ_continuousSpeed;
+		break;
+	}
+	_A4988_enableTIM_IRQ(motor);
 }
 
 /**
@@ -56,19 +67,30 @@ void A4988_timer_init(A4988_t* motor, TIM_TypeDef* timer, uint8_t timerChannel, 
 	motor->_timerChannel = timerChannel;
 	motor->_timerInt = timerInt;
 	//Configuring timer
-	motor->_timer->CR1 &=~ TIM_CR1_CEN;						//deactivate off timer
-	motor->_timer->PSC = (APBClockFreq / 1000000) - 1;		//set 1µs tick
-	motor->_timer->ARR = 5000;								//count 5000µs for init
-	motor->_timer->CCR1 = MIN_PULSE_LENGTH;					//PWM: Ton
 
+	//Disable counter
+	motor->_timer->CR1 &=~ TIM_CR1_CEN;
+	//Set pre-scaler for 1us tick
+	motor->_timer->PSC = (APBClockFreq / 1000000) - 1;
+	//Initialize ARR, this value doesn't matter and will change
+	motor->_timer->ARR = 5000;
+	//The value to be compared to TIMx counter and signaled on OC1 output
+	//This is active duty cycle and needs to be longer than our A4988 settling time of 1us
+	motor->_timer->CCR1 = MIN_PULSE_LENGTH;
+
+	//Sets 0x6, enabling PWM mode 1
+	//Channel x is active as long as TIMx->CNT < CCR1
 	if(motor->_timerChannel == 1)      motor->_timer->CCMR1 |= TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2;
 	else if(motor->_timerChannel == 2) motor->_timer->CCMR1 |= TIM_CCMR1_OC2M_1 | TIM_CCMR1_OC2M_2;
 	else if(motor->_timerChannel == 3) motor->_timer->CCMR2 |= TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC3M_2;
 	else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_1 | TIM_CCMR2_OC4M_2;
 
-	motor->_timer->SR = 0;									//clear interrupt flags
-	motor->_timer->DIER |= 1 << motor->_timerChannel;		//activate interrupts
-	motor->_timer->CR1 |= TIM_CR1_CEN;						//activate timer
+	//Clear interrupt flags
+	motor->_timer->SR = 0;
+	//Capture compare interrupt enable
+	motor->_timer->DIER |= 1 << motor->_timerChannel;
+	//Enable timer
+	motor->_timer->CR1 |= TIM_CR1_CEN;
 	}
 
 /**
@@ -111,7 +133,7 @@ void A4988_alt_states_init(A4988_t* motor, GPIO_TypeDef* RSTPort, uint16_t RSTPi
  *
  * @param	motor object initialized
  */
-void A4988_enableTIM_IRQ(A4988_t* motor)
+void _A4988_enableTIM_IRQ(A4988_t* motor)
 {
 	NVIC_EnableIRQ(motor->_timerInt);
 }
@@ -126,14 +148,19 @@ void A4988_enableTIM_IRQ(A4988_t* motor)
 void _A4988_start(A4988_t* motor)
 {
 	motor->_state = RUNNING;
+	//Reset timer and force ARR to update
+	//Question: will this allow moves to overwrite?
+	//CNT/EGR might need to be moved back to the run method
+	motor->_timer->CNT = 0;
+	motor->_timer->EGR |= TIM_EGR_CC1G;
 	//Connect timer to output pin (ARMED)
-	//CH1:Bit0, CH2:Bit4, CH3:Bit8...
 	motor->_timer->CCER |= 1 << (motor->_timerChannel - 1) * 4;
 }
 
 /**
  * @brief	Stops the motor
  * @note	This sets the CCxE bit of TIMx which toggles whether the signal is output on the corresponding output pin
+ * 			Does not stop the timer
  *
  * @param	motor pointer
  */
@@ -149,32 +176,25 @@ void _A4988_stop(A4988_t* motor)
  * @note	At the end of every timer cycle the IRQ will be called and handled by this function. This is what
  * 			lets us set the state and the pulse of the next clock cycle. MAKE SURE this function is called in your timer
  * 			interrupt initializer in stm32f4xx_it.c
+ * 			The actual handling is broken into smaller functions to minimize handling time
  *
  * @param	motor pointer
  */
-void A4988_IRQ_Handler(A4988_t* motor)
-{
-	//Check that it was our clock cycle that called interrupt
+void A4988_IRQ_Handler(A4988_t* motor){
+	//Check interrupt triggered by TIM
 	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
 	motor->_timer->SR &=~ TIM_SR_CC1IF;
-	uint16_t arr = 0;
+	motor->_irqHandler(motor);
+}
 
+/**
+ * @brief	IRQ handler for constant speed mode
+ *
+ * @param	motor pointer
+ */
+void _A4988_IRQ_constantSpeed(A4988_t* motor){
 	switch(A4988_getState(motor)){
 	case RUNNING:
-
-		//Adding for continuous speed mode
-		//This mode still uses running/stabilizing states but should only ever be left running
-		if(A4988_getMode(motor) == CONTINUOUS_SPEED){
-			if(A4988_getDir(motor) == FORWARD){
-				motor->_position++;
-			}
-			else{
-				motor->_position--;
-			}
-			return;
-		}
-
-		//If we still have steps to take, update position and check what sub state we are in
 		if(motor->_stepsRemaining > 0){
 			motor->_stepsRemaining--;
 			if(A4988_getDir(motor) == FORWARD){
@@ -183,11 +203,40 @@ void A4988_IRQ_Handler(A4988_t* motor)
 			else{
 				motor->_position--;
 			}
+		}
+		else{
+			_A4988_stop(motor);
+		}
+		break;
 
+	case STABILIZING:
+		_A4988_IRQ_stabilizing(motor);
+		break;
+	}
+}
+
+/**
+ * @brief	IRQ handler for linear speed mode
+ *
+ * @param	motor pointer
+ */
+void _A4988_IRQ_linearSpeed(A4988_t* motor){
+	uint16_t arr = 0 ;
+	switch(A4988_getState(motor)){
+	case RUNNING:
+		if(motor->_stepsRemaining > 0){
+			motor->_stepsRemaining--;
+			if(A4988_getDir(motor) == FORWARD){
+				motor->_position++;
+			}
+			else{
+				motor->_position--;
+			}
 			//Determine motion sub-state (accel, cruise, decel)
 			switch(A4988_getMotionState(motor)){
 			case ACCEL:
 				motor->_accelSteps--;
+				//Checks triangular speed profile
 				if(motor->_accelSteps == 0 && motor->_cruiseSteps == 0){
 					motor->_speedProfile._motionState = DECEL;
 				}
@@ -202,20 +251,18 @@ void A4988_IRQ_Handler(A4988_t* motor)
 				}
 				break;
 
+			case CRUISE:
+				if(motor->_stepsRemaining == motor->_decelSteps){
+				motor->_speedProfile._motionState = DECEL;
+				}
+				break;
+
 			case DECEL:
 				motor->_decelSteps--;
 				arr = _A4988_computeArrFromSpS2(motor, motor->_stepsRemaining, motor->_speedProfile._decelRate);
 				_A4988_setARR(motor, arr);
-
-				break;
-
-			case CRUISE:
-				if(motor->_stepsRemaining == motor->_decelSteps){
-					motor->_speedProfile._motionState = DECEL;
-				}
 				break;
 			}
-
 		}
 		//No steps remain, reset to idle
 		else{
@@ -224,18 +271,51 @@ void A4988_IRQ_Handler(A4988_t* motor)
 		break;
 
 	case STABILIZING:
-		//Waiting for dir pin to stabilize
-		if(motor->_stabilizeCounter > 0) motor->_stabilizeCounter--;
-		else
-		{
-			motor->_state = RUNNING;
-			//Enable Output Compare Mode
-			if(motor->_timerChannel == 1)      motor->_timer->CCMR1 |= TIM_CCMR1_OC1M_2;
-			else if(motor->_timerChannel == 2) motor->_timer->CCMR1 |= TIM_CCMR1_OC2M_2;
-			else if(motor->_timerChannel == 3) motor->_timer->CCMR2 |= TIM_CCMR2_OC3M_2;
-			else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_2;
-		}
+		_A4988_IRQ_stabilizing(motor);
 		break;
+	}
+
+}
+
+/**
+ * @brief	IRQ handler for continuous speed mode
+ *
+ * @param	motor pointer
+ */
+void _A4988_IRQ_continuousSpeed(A4988_t* motor){
+	switch(A4988_getState(motor)){
+	case RUNNING:
+		if(A4988_getDir(motor) == FORWARD){
+				motor->_position++;
+			}
+			else{
+				motor->_position--;
+			}
+		break;
+
+	case STABILIZING:
+		_A4988_IRQ_stabilizing(motor);
+		break;
+	}
+}
+
+/**
+ * @brief	Reusable function that waits for motors to stabilize before enabling PWM.
+ * 			Used for IRQs
+ *
+ * @param	motor pointer
+ */
+void _A4988_IRQ_stabilizing(A4988_t* motor){
+	//Waiting for DIR pin to stabilize
+	if(motor->_stabilizeCounter > 0) motor->_stabilizeCounter--;
+	else
+	{
+		motor->_state = RUNNING;
+		//Enable PWM Mode 1
+		if(motor->_timerChannel == 1)      motor->_timer->CCMR1 |= TIM_CCMR1_OC1M_2;
+		else if(motor->_timerChannel == 2) motor->_timer->CCMR1 |= TIM_CCMR1_OC2M_2;
+		else if(motor->_timerChannel == 3) motor->_timer->CCMR2 |= TIM_CCMR2_OC3M_2;
+		else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_2;
 	}
 }
 
@@ -245,8 +325,7 @@ void A4988_IRQ_Handler(A4988_t* motor)
  * @param 	motor pointer
  * @param	steps to move (positive or negative)
  */
-void A4988_move(A4988_t* motor, int32_t steps)
-{
+void A4988_move(A4988_t* motor, int32_t steps){
 	//Check mode profile to setup runtime parameters
 	motor->_totalSteps = abs(steps);
 	motor->_stepsRemaining =abs(steps);
@@ -277,13 +356,47 @@ void A4988_move(A4988_t* motor, int32_t steps)
 		break;
 	}
 	//Check direction change
-	bool dirChanged;
-	if(steps > 0){
-		dirChanged = _A4988_setDir(motor, FORWARD);
+    bool dirChanged = _A4988_setDir(motor,(steps > 0 ? FORWARD : BACKWARD));
+	//Start movement if in same direction
+	if(!dirChanged)_A4988_start(motor);
+	else{
+		//Start PWM when stabilized
+		//Connect timer channel to output pin (armed not firing)
+		motor->_timer->CCER |= 1 << (motor->_timerChannel -1) * 4;
+	}
+}
+
+/**
+ *  @brief	Runs the motor at continuous steps per second
+ *
+ * @param	motor pointer
+ * @param	steps per second (positive or negative direction)
+ */
+void A4988_run(A4988_t* motor, int16_t sps){
+	uint16_t a_sps = abs(sps);
+	if (a_sps < 1){
+			motor->_rpm = 0;
+			_A4988_stop(motor);
+		    return;
+	}
+	//Set the rpm
+	uint32_t arr = 0;
+	motor->_rpm = a_sps * 60 / motor->_microStepsPerRev;
+	if(motor->_rpm > MAX_RPM){
+		motor->_rpm = MAX_RPM;
+		arr = _A4988_computeArrFromRPM(motor, MAX_RPM);
 	}
 	else{
-		dirChanged = _A4988_setDir(motor, BACKWARD);
+		 arr = _A4988_computeArrFromSpS(motor, a_sps);
 	}
+	//Set ARR
+	_A4988_setARR(motor, arr);
+//	motor->_timer->CNT = 0;
+//	motor->_timer->EGR |= TIM_EGR_CC1G;
+
+	//Check direction change
+    bool dirChanged = _A4988_setDir(motor,(sps > 0 ? FORWARD : BACKWARD));
+
 	//Start movement if in same direction
 	if(!dirChanged)
 	{
@@ -292,7 +405,7 @@ void A4988_move(A4988_t* motor, int32_t steps)
 	//Start PWM when stabilized
 	else
 	{
-		//Connect timer channel to output pin (ARMED)
+		//Connect timer channel to output pin (armed not firing)
 		motor->_timer->CCER |= 1 << (motor->_timerChannel -1) * 4;
 	}
 }
@@ -315,7 +428,6 @@ bool _A4988_setDir(A4988_t* motor, bool dir)
 	motor->_state = STABILIZING;
 	//Total wait time = STABILIZE_TIME * ARR duration [us]. Because min is 1[us] a low STABILIZE_TIME should be acceptable
 	motor->_stabilizeCounter = STABILIZE_TIME;
-
 	//Sets capture/compare mode register's (CCMRx) output compare mode (OCxM) to inactive on match, disabling the timer output
 	if(			motor->_timerChannel == 1) motor->_timer->CCMR1 &=~ TIM_CCMR1_OC1M_2;
 		else if(motor->_timerChannel == 2) motor->_timer->CCMR1 &=~ TIM_CCMR1_OC2M_2;
@@ -353,6 +465,22 @@ uint32_t _A4988_computeArrFromRPM(A4988_t* motor, uint16_t rpm)
 	if (freq <0.1f) return 0xFFFF;
 	//ARR Time [us] = 1000000[us/s] / frequency[1/s]
 //	printf("%f\n", freq);
+	return (uint32_t)1000000/freq;
+}
+
+/**
+ * @brief	computes ARR from steps per second. Useful if running the motors with a gyroscope
+ *
+ * @param	motor pointer
+ * @parma 	sps is steps per second value
+ * @retval	arr for pwm frequency
+ */
+uint32_t _A4988_computeArrFromSpS(A4988_t* motor, uint16_t sps){
+	//Frequency [1/s] = steps/sec
+	float freq = (float)sps;
+	//Avoid DB0
+	if (freq <0.1f) return 0xFFFF;
+	//ARR Time [us] = 1000000[us/s] / frequency[1/s]
 	return (uint32_t)1000000/freq;
 }
 
@@ -396,17 +524,20 @@ void _A4988_setARR(A4988_t* motor, uint32_t arr)
 }
 
 /**
- * @brief Used to set RPM when motor is idled
+ * @brief 	Used to set RPM when motor is idled
+ *
+ * @param	motor pointer
+ * @param	rpm
  */
 void A4988_setRPM(A4988_t* motor, uint16_t rpm)
 {
+	uint16_t _rpm = rpm > MAX_RPM ? MAX_RPM : rpm;
 	//Deactive timer
 	motor->_timer->CR1 &=~ TIM_CR1_CEN;
-
-	uint32_t arr = _A4988_computeArrFromRPM(motor, rpm);
-
-	motor->_timer->ARR = arr -1;
-	motor->_rpm = rpm;
+	uint32_t arr = _A4988_computeArrFromRPM(motor, _rpm);
+	_A4988_setARR(motor, arr);
+	motor->_rpm = _rpm;
+	//Reactivate timer
 	motor->_timer->CR1 |= TIM_CR1_CEN;
 }
 
@@ -432,7 +563,6 @@ volatile uint16_t A4988_getPosition(A4988_t* motor)
 {
 	return motor->_position;
 }
-
 
 volatile int16_t A4988_getAngleDegree(A4988_t* motor) //Needs work
 {
@@ -475,20 +605,25 @@ volatile uint8_t A4988_getMotionState(A4988_t* motor)
 }
 
 /**
- * @brief	Sets the motor mode (constant or linear speed profile)
+ * @brief	Sets the motor mode (constant/linear/continuous)
  *
  * @param	motor pointer
- * @param	mode (CONSTANT or LINEAR)
+ * @param	mode, constant, linear, continuous
  */
 void A4988_setMode(A4988_t* motor, uint8_t mode)
 {
-	if(mode == CONSTANT_SPEED){
-		_A4988_setMotionState(motor, CRUISE);
+	motor->_speedProfile._mode = mode;
+	switch(mode){
+	case CONSTANT_SPEED:
+		motor->_irqHandler = &_A4988_IRQ_constantSpeed;
+		break;
+	case LINEAR_SPEED:
+		motor->_irqHandler = &_A4988_IRQ_linearSpeed;
+		break;
+	case CONTINUOUS_SPEED:
+		motor->_irqHandler = &_A4988_IRQ_continuousSpeed;
+		break;
 	}
-	else{
-		_A4988_setMotionState(motor, ACCEL);
-	}
-	motor->_speedProfile._mode;
 }
 
 /**
@@ -541,8 +676,6 @@ void A4988_setLinearSpeedProfile(A4988_t* motor, SpeedProfile_t profile)
 	motor->_speedProfile._accelRate = profile._accelRate;
 	motor->_speedProfile._accelRate = profile._decelRate;
 }
-
-
 
 /**
  * @brief	Sets full step
@@ -643,87 +776,130 @@ void A4988_setMicrostepResolution(A4988_t* motor, A4988_Resolution_e resolution)
 }
 
 /**
- * @brief	computes ARR from steps per second. Useful if running the motors with a gyroscope
- *
- * @param	motor pointer
- * @parma 	sps is steps per second value
- * @retval	arr for pwm frequency
+ * DEFUNCT
  */
-uint32_t _A4988_computeArrFromSpS(A4988_t* motor, uint16_t sps){
-	//Frequency [1/s] = steps/sec
-	float freq = (float)sps;
-	//Avoid DB0
-	if (freq <0.1f) return 0xFFFF;
-	//ARR Time [us] = 1000000[us/s] / frequency[1/s]
-	return (uint32_t)1000000/freq;
-}
+//void _A4988_forceToggleMode(A4988_t* motor)
+//{
+//    switch (motor->_timerChannel)
+//    {
+//    case 1:
+//        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC1M;  // Clear OC1M bits
+//        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC1M_Pos);  // Set toggle mode
+//        motor->_timer->CCER |= TIM_CCER_CC1E;     // Enable output
+//        break;
+//
+//    case 2:
+//        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC2M;
+//        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC2M_Pos);
+//        motor->_timer->CCER |= TIM_CCER_CC2E;
+//        break;
+//
+//    case 3:
+//        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC3M;
+//        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC3M_Pos);
+//        motor->_timer->CCER |= TIM_CCER_CC3E;
+//        break;
+//
+//    case 4:
+//        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC4M;
+//        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC4M_Pos);
+//        motor->_timer->CCER |= TIM_CCER_CC4E;
+//        break;
+//
+//    default:
+//        break;
+//    }
+//}
 
 /**
- * @brief	Runs the motor at continuous steps per second
- *
- * @param	motor pointer
- * @param	steps per second (positive or negative direction)
+ * DEFUNCT
  */
-void A4988_run(A4988_t* motor, int16_t sps){
-
-	//Set the rpm
-	uint16_t a_sps = abs(sps);
-	motor->_rpm = a_sps * 60 / motor->_microStepsPerRev;
-	if (a_sps < 1) {
-		_A4988_stop(motor);
-	    return;
-	}
-
-	//Set ARR
-	uint32_t arr = _A4988_computeArrFromSpS(motor, a_sps);
-	_A4988_setARR(motor, arr);
-
-	//Check direction change
-    bool dirChanged = _A4988_setDir(motor,(sps > 0 ? FORWARD : BACKWARD));
-
-	//Start movement if in same direction
-	if(!dirChanged)
-	{
-		_A4988_start(motor);
-	}
-	//Start PWM when stabilized
-	else
-	{
-		//Connect timer channel to output pin (ARMED)
-		motor->_timer->CCER |= 1 << (motor->_timerChannel -1) * 4;
-	}
-}
-
-void _A4988_forceToggleMode(A4988_t* motor)
-{
-    switch (motor->_timerChannel)
-    {
-    case 1:
-        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC1M;  // Clear OC1M bits
-        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC1M_Pos);  // Set toggle mode
-        motor->_timer->CCER |= TIM_CCER_CC1E;     // Enable output
-        break;
-
-    case 2:
-        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC2M;
-        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC2M_Pos);
-        motor->_timer->CCER |= TIM_CCER_CC2E;
-        break;
-
-    case 3:
-        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC3M;
-        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC3M_Pos);
-        motor->_timer->CCER |= TIM_CCER_CC3E;
-        break;
-
-    case 4:
-        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC4M;
-        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC4M_Pos);
-        motor->_timer->CCER |= TIM_CCER_CC4E;
-        break;
-
-    default:
-        break;
-    }
-}
+//void A4988_IRQ_Handler(A4988_t* motor)
+//{
+//
+//	//Check that it was our clock cycle that called interrupt
+//	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
+//	motor->_timer->SR &=~ TIM_SR_CC1IF;
+//
+//
+//	uint16_t arr = 0;
+//	switch(A4988_getState(motor)){
+//	case RUNNING:
+//
+//		//Adding for continuous speed mode
+//		//This mode still uses running/stabilizing states but should only ever be left running
+//		if(A4988_getMode(motor) == CONTINUOUS_SPEED){
+//			if(A4988_getDir(motor) == FORWARD){
+//				motor->_position++;
+//			}
+//			else{
+//				motor->_position--;
+//			}
+//			return;
+//		}
+//
+//		//If we still have steps to take, update position and check what sub state we are in
+//		if(motor->_stepsRemaining > 0){
+//			motor->_stepsRemaining--;
+//			if(A4988_getDir(motor) == FORWARD){
+//				motor->_position++;
+//			}
+//			else{
+//				motor->_position--;
+//			}
+//
+//			//Determine motion sub-state (accel, cruise, decel)
+//			switch(A4988_getMotionState(motor)){
+//			case ACCEL:
+//				motor->_accelSteps--;
+//				if(motor->_accelSteps == 0 && motor->_cruiseSteps == 0){
+//					motor->_speedProfile._motionState = DECEL;
+//				}
+//				else if (motor->_accelSteps == 0){
+//					motor->_speedProfile._motionState = CRUISE;
+//					arr = _A4988_computeArrFromRPM(motor, motor->_rpm);
+//					_A4988_setARR(motor, arr);
+//				}
+//				else{
+//					arr = _A4988_computeArrFromSpS2(motor, (motor->_totalSteps - motor->_stepsRemaining), motor->_speedProfile._accelRate);
+//					_A4988_setARR(motor, arr);
+//				}
+//				break;
+//
+//			case DECEL:
+//				motor->_decelSteps--;
+//				arr = _A4988_computeArrFromSpS2(motor, motor->_stepsRemaining, motor->_speedProfile._decelRate);
+//				_A4988_setARR(motor, arr);
+//
+//				break;
+//
+//			case CRUISE:
+//				if(motor->_stepsRemaining == motor->_decelSteps){
+//					motor->_speedProfile._motionState = DECEL;
+//				}
+//				break;
+//			}
+//
+//		}
+//		//No steps remain, reset to idle
+//		else{
+//			_A4988_stop(motor);
+//		}
+//		break;
+//
+//	case STABILIZING:
+//		//Waiting for dir pin to stabilize
+//		if(motor->_stabilizeCounter > 0) motor->_stabilizeCounter--;
+//		else
+//		{
+//			motor->_state = RUNNING;
+//			//Enable Output Compare Mode
+//			if(motor->_timerChannel == 1)      motor->_timer->CCMR1 |= TIM_CCMR1_OC1M_2;
+//			else if(motor->_timerChannel == 2) motor->_timer->CCMR1 |= TIM_CCMR1_OC2M_2;
+//			else if(motor->_timerChannel == 3) motor->_timer->CCMR2 |= TIM_CCMR2_OC3M_2;
+//			else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_2;
+//		}
+//		break;
+//	}
+//}
 

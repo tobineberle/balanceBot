@@ -39,11 +39,9 @@
 #ifndef INC_A4988_H_
 #define INC_A4988_H_
 
-#define STABILIZE_TIME		10
+#define STABILIZE_TIME		2
 #define MIN_PULSE_LENGTH	10	//[us], note 1us min pulse length minimum, we give 10 for margin
 #define MAX_RPM				100
-#define MIN(a,b)			(b < a ? b : a)
-#define MAX(a,b)			(b > a ? b : a)
 
 enum Direction {FORWARD, BACKWARD};
 enum State {IDLE, RUNNING, SLEEPING, STABILIZING};
@@ -51,6 +49,9 @@ enum Mode {CONSTANT_SPEED, LINEAR_SPEED, CONTINUOUS_SPEED};
 enum MotionState {ACCEL, CRUISE, DECEL};
 typedef enum {FULL, HALF, QUARTER, EIGHTH, SIXTEENTH} A4988_Resolution_e;
 
+struct A4988;
+typedef struct A4988 A4988_t;
+typedef void _irqHandler(A4988_t*);
 typedef struct
 {
 	uint8_t _mode;
@@ -60,7 +61,7 @@ typedef struct
 
 }SpeedProfile_t;
 
-typedef struct
+struct A4988
 {
 	/*
 	 * Driver Config
@@ -93,7 +94,7 @@ typedef struct
 	 * Motor Variables
 	 */
 	volatile uint16_t _microStepsPerRev;
-	uint16_t _rpm;						//Speed
+	uint16_t _rpm;						//Motor speed setpoint
 	A4988_Resolution_e _resolution;		//Microstepping resolution
 	volatile uint8_t _state;			//State of the motor
 	volatile uint16_t _stabilizeCounter;//For direction change stabilization
@@ -104,7 +105,8 @@ typedef struct
 	volatile uint16_t _decelSteps;		//To reach brake
 	volatile uint16_t _cruiseSteps;		//Total cruise steps
 	SpeedProfile_t _speedProfile;		//Profile to configure accel, decel, and modes
-}A4988_t;
+	void(*_irqHandler)(A4988_t* motor);		//Function pointer to determine the irq call
+};
 
 //Remove or change for your program
 extern A4988_t motA;
@@ -116,26 +118,31 @@ extern A4988_t motB;
  */
 
 //Public Init
-A4988_t A4988_init(GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t mode);
+void A4988_init(A4988_t* motor, GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t mode);
 void A4988_timer_init(A4988_t* motor, TIM_TypeDef* timer, uint8_t timerChannel, IRQn_Type timerInt, uint32_t APBClockFreq);
 void A4988_microstepping_init(A4988_t* motor, GPIO_TypeDef* MS1Port, uint16_t MS1Pin, GPIO_TypeDef* MS2Port, uint16_t MS2Pin, GPIO_TypeDef* MS3Port, uint16_t MS3Pin);
 void A4988_alt_states_init(A4988_t* motor, GPIO_TypeDef* RSTPort, uint16_t RSTPin, GPIO_TypeDef* SLPPort, uint16_t SLPPin, GPIO_TypeDef* ENPort, uint16_t ENPin);
-void A4988_enableTIM_IRQ(A4988_t* motor);
 
 //Private Motor Control
 void _A4988_start(A4988_t* motor);
 void _A4988_stop(A4988_t* motor);
 bool _A4988_setDir(A4988_t* motor, bool dir);
 uint32_t _A4988_computeArrFromRPM(A4988_t* motor, uint16_t rpm);
+uint32_t _A4988_computeArrFromSpS(A4988_t* motor, uint16_t sps);
 uint32_t _A4988_computeArrFromSpS2(A4988_t* motor, uint16_t deltaSteps, uint16_t rate);
 void _A4988_setARR(A4988_t* motor, uint32_t arr);
 void _A4988_setMotionState(A4988_t* motor, uint8_t motionState);
-uint32_t _A4988_computeArrFromSpS(A4988_t* motor, uint16_t sps);
-void _A4988_forceToggleMode(A4988_t* motor);
+void _A4988_forceToggleMode(A4988_t* motor); //for deletion
 
+//IRQ Handling
+void _A4988_enableTIM_IRQ(A4988_t* motor);
+void A4988_IRQ_Handler(A4988_t* motor);
+void _A4988_IRQ_constantSpeed(A4988_t* motor); //new
+void _A4988_IRQ_linearSpeed(A4988_t* motor); //new
+void _A4988_IRQ_continuousSpeed(A4988_t* motor); //new
+void _A4988_IRQ_stabilizing(A4988_t* motor); //new
 
 //Public
-void A4988_IRQ_Handler(A4988_t* motor);
 void A4988_move(A4988_t* motor, int32_t steps);
 bool A4988_getDir(A4988_t* motor);
 void A4988_setRPM(A4988_t* motor, uint16_t rpm);
