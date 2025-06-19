@@ -23,7 +23,8 @@ void A4988_init(A4988_t* motor, GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t 
 	motor->_dirPin = dirPin;
 	//Default no microstepping
 	motor->_microStepsPerRev = 200;
-	motor->_rpm = 100;
+	motor->_rpm = 0;
+	motor->_sps = 0;
 	motor->_resolution = FULL;
 	motor->_state = IDLE;
 	motor->_stabilizeCounter = 0;
@@ -47,6 +48,9 @@ void A4988_init(A4988_t* motor, GPIO_TypeDef* dirPort, uint16_t dirPin, uint8_t 
 	case CONTINUOUS_SPEED:
 		motor->_irqHandler = _A4988_IRQ_continuousSpeed;
 		break;
+	case STEP_QUEUE:
+		motor->_irqHandler = _A4988_IRQ_stepQ;
+		break;
 	}
 	_A4988_enableTIM_IRQ(motor);
 }
@@ -66,8 +70,8 @@ void A4988_timer_init(A4988_t* motor, TIM_TypeDef* timer, uint8_t timerChannel, 
 	motor->_timer = timer;
 	motor->_timerChannel = timerChannel;
 	motor->_timerInt = timerInt;
-	//Configuring timer
 
+	//Configuring timer
 	//Disable counter
 	motor->_timer->CR1 &=~ TIM_CR1_CEN;
 	//Set pre-scaler for 1us tick
@@ -92,6 +96,48 @@ void A4988_timer_init(A4988_t* motor, TIM_TypeDef* timer, uint8_t timerChannel, 
 	//Enable timer
 	motor->_timer->CR1 |= TIM_CR1_CEN;
 	}
+
+/**
+ * @brief	Initializes the timer to drive the step pin for step queue mode
+ * @note	DO NOT CALL RPM SETTING OR MOVE FUNCTIONS AFTER INITIALZING THIS WAY AS YOU WILL RESET ARR AND THROW OFF TIMER IRQ CALLS
+ * @note	DONT ASK HOW LONG IT TOOK TO FIGURE THAT ONE OUT
+ *
+ * @param	motor object initialized
+ * @param 	timer chosen for running the motor (eg TIM2)
+ * @param 	timerInt is for interrupt, needs the IRQn (eg TIM2_IRQn)
+ * @param	APBClockFreq is clock frequency of your APB bus
+ * @param	motorClockPeriod in us
+ * @param	port for stepping
+ * @param	pin for stepping
+ */
+void A4988_StepQ_timer_init(A4988_t* motor, TIM_TypeDef* timer, IRQn_Type timerInt, uint32_t APBClockFreq, uint32_t motorClockPeriod, GPIO_TypeDef* stepPort, uint16_t stepPin){
+	//Init timer
+	motor->_timer = timer;
+	motor->_timerChannel = 0;
+	motor->_timerInt = timerInt;
+	motor->_timer->CR1 &=~ TIM_CR1_CEN;
+	motor->_timer->PSC = (APBClockFreq / 1000000) - 1;
+	motor->_timer->ARR = motorClockPeriod - 1;
+//	motor->_timer->PSC = 0;
+//	motor->_timer->ARR = 1599;
+	motor->_timer->EGR = TIM_EGR_UG;
+	//IRQ on ARR value
+	motor->_timer->DIER |= TIM_DIER_UIE;
+	motor->_timer->CR1 |= TIM_CR1_CEN;
+	_A4988_enableTIM_IRQ(motor);
+
+	//Init Step pin
+	//Medium speed for faster response, the switching speed should be 25MHz
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+	motor->_stepPort = stepPort;
+	motor->_stepPin = stepPin;
+	HAL_GPIO_WritePin(stepPort, stepPin, GPIO_PIN_RESET);
+	GPIO_InitStruct.Pin = stepPin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	HAL_GPIO_Init(stepPort, &GPIO_InitStruct);
+}
 
 /**
  * @brief	Initializes microstepping, to use microstepping call set_microsteps
@@ -181,9 +227,6 @@ void _A4988_stop(A4988_t* motor)
  * @param	motor pointer
  */
 void A4988_IRQ_Handler(A4988_t* motor){
-	//Check interrupt triggered by TIM
-	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
-	motor->_timer->SR &=~ TIM_SR_CC1IF;
 	motor->_irqHandler(motor);
 }
 
@@ -193,6 +236,8 @@ void A4988_IRQ_Handler(A4988_t* motor){
  * @param	motor pointer
  */
 void _A4988_IRQ_constantSpeed(A4988_t* motor){
+	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
+	motor->_timer->SR &=~ TIM_SR_CC1IF;
 	switch(A4988_getState(motor)){
 	case RUNNING:
 		if(motor->_stepsRemaining > 0){
@@ -221,6 +266,8 @@ void _A4988_IRQ_constantSpeed(A4988_t* motor){
  * @param	motor pointer
  */
 void _A4988_IRQ_linearSpeed(A4988_t* motor){
+	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
+	motor->_timer->SR &=~ TIM_SR_CC1IF;
 	uint16_t arr = 0 ;
 	switch(A4988_getState(motor)){
 	case RUNNING:
@@ -283,6 +330,8 @@ void _A4988_IRQ_linearSpeed(A4988_t* motor){
  * @param	motor pointer
  */
 void _A4988_IRQ_continuousSpeed(A4988_t* motor){
+	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
+	motor->_timer->SR &=~ TIM_SR_CC1IF;
 	switch(A4988_getState(motor)){
 	case RUNNING:
 		if(A4988_getDir(motor) == FORWARD){
@@ -318,6 +367,57 @@ void _A4988_IRQ_stabilizing(A4988_t* motor){
 		else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_2;
 	}
 }
+
+/**
+ * @brief	IRQ handler for continuous stepQ.
+ * @note	Needs to be FAST
+ *
+ * @param	motor pointer
+ */
+void _A4988_IRQ_stepQ(A4988_t* motor)
+{
+    if (!(motor->_timer->SR & TIM_SR_UIF)) return;
+    motor->_timer->SR &= ~TIM_SR_UIF;
+    motor->_totalSteps += 1;
+    if (motor->_position == 0) return;
+
+    bool dir = (motor->_position> 0);
+    motor->_position += dir ? -1 : 1;
+
+    // DIR setup
+    motor->_dirPort->ODR = (motor->_dirPort->ODR & ~motor->_dirPin)|(dir ? motor->_dirPin : 0);
+    _A4988_NOP_Delay(16);
+    // STEP pulse — keep high for ~1 µs
+    motor->_stepPort->BSRR = motor->_stepPin;        // STEP HIGH
+    _A4988_NOP_Delay(16);
+    motor->_stepPort->BSRR = (uint32_t)motor->_stepPin << 16;         // STEP LOW
+}
+
+/**
+ * @brief	Provides a blocking delay on the order of 62.5ns
+ *
+ * @param 	iters, multiplier for ns wait (e.g. 62.5ns * iters = delay time)
+ */
+void _A4988_NOP_Delay(uint16_t iters){
+	for(uint16_t i = 0; i < iters; i++){
+		//62.5ns delay (@16MHz)
+		__NOP();
+	}
+}
+
+/**
+* @brief	Function for queuing steps
+* 			Uses atomic IRQ disable and re-enable to prevent overlap between queuing steps and reading them
+*
+* @param	motor pointer
+* @param	steps to queue
+*/
+void A4988_queueSteps(A4988_t* motor, int32_t steps){
+	__disable_irq();
+	motor->_position += steps;
+	__enable_irq();
+}
+
 
 /**
  * @brief	Move the motor a specified number of steps. Will use your current microstepping resolution
@@ -373,17 +473,25 @@ void A4988_move(A4988_t* motor, int32_t steps){
  * @param	steps per second (positive or negative direction)
  */
 void A4988_run(A4988_t* motor, int16_t sps){
+	//No updating if sps is constant
+	if(sps == motor->_sps)return;
+
+	//Stopping if less than a complete step/second
 	uint16_t a_sps = abs(sps);
-	if (a_sps < 1){
-			motor->_rpm = 0;
-			_A4988_stop(motor);
-		    return;
+//	if (a_sps < pow(2, motor->_resolution)){
+	if(a_sps == 0){
+		motor->_rpm = 0;
+		_A4988_stop(motor);
+		return;
 	}
 	//Set the rpm
 	uint32_t arr = 0;
+	motor->_sps = sps;
 	motor->_rpm = a_sps * 60 / motor->_microStepsPerRev;
+
 	if(motor->_rpm > MAX_RPM){
 		motor->_rpm = MAX_RPM;
+		motor->_sps = MAX_RPM * motor->_microStepsPerRev / 60;
 		arr = _A4988_computeArrFromRPM(motor, MAX_RPM);
 	}
 	else{
@@ -564,7 +672,7 @@ volatile uint16_t A4988_getPosition(A4988_t* motor)
 	return motor->_position;
 }
 
-volatile int16_t A4988_getAngleDegree(A4988_t* motor) //Needs work
+volatile int16_t A4988_getAngleDeg(A4988_t* motor) //Needs work
 {
 	 return (int16_t)(( (double)motor->_position / motor->_microStepsPerRev ) * 360.0) % 360;
 }
@@ -766,140 +874,38 @@ void A4988_setMicrostepResolution(A4988_t* motor, A4988_Resolution_e resolution)
 	//Scaling up the resolution
 	if(resolution > motor->_resolution){
 		motor->_position *= pow(2, (resolution - motor->_resolution));
+		motor->_sps *= pow(2, (resolution - motor->_resolution));
 	}
 	//Scaling down resolution
 	else{
 		motor->_position /= pow(2, (resolution - motor->_resolution));
+		motor->_sps /= pow(2, (resolution - motor->_resolution));
 	}
 	motor->_resolution = resolution;
-	A4988_setRPM(motor, motor->_rpm);
+	if(motor->_speedProfile._mode != STEP_QUEUE){
+		A4988_setRPM(motor, motor->_rpm);
+	}
 }
 
 /**
  * DEFUNCT
  */
-//void _A4988_forceToggleMode(A4988_t* motor)
-//{
-//    switch (motor->_timerChannel)
-//    {
-//    case 1:
-//        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC1M;  // Clear OC1M bits
-//        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC1M_Pos);  // Set toggle mode
-//        motor->_timer->CCER |= TIM_CCER_CC1E;     // Enable output
-//        break;
+//void _A4988_IRQ_stepQ(A4988_t* motor){
+//	//Clear UIF flags (required by software)
+//	if(!(motor->_timer->SR & TIM_SR_UIF)) return;
+//	motor->_timer->SR &=~ TIM_SR_UIF;
+//	//Tracking IRQ calls
+//    motor->_totalSteps += 1;
+//	if(motor->_position == 0) return;
 //
-//    case 2:
-//        motor->_timer->CCMR1 &= ~TIM_CCMR1_OC2M;
-//        motor->_timer->CCMR1 |= (0b011 << TIM_CCMR1_OC2M_Pos);
-//        motor->_timer->CCER |= TIM_CCER_CC2E;
-//        break;
+//	bool dir = (motor->_position > 0);
+//    HAL_GPIO_WritePin(motor->_dirPort, motor->_dirPin, dir ? GPIO_PIN_SET : GPIO_PIN_RESET);
 //
-//    case 3:
-//        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC3M;
-//        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC3M_Pos);
-//        motor->_timer->CCER |= TIM_CCER_CC3E;
-//        break;
+//    //Use a step
+//    _A4988_NOP_Delay(32);
+//    HAL_GPIO_WritePin(motor->_stepPort, motor->_stepPin, GPIO_PIN_SET);
+//    _A4988_NOP_Delay(32);
+//    HAL_GPIO_WritePin(motor->_stepPort, motor->_stepPin, GPIO_PIN_RESET);
 //
-//    case 4:
-//        motor->_timer->CCMR2 &= ~TIM_CCMR2_OC4M;
-//        motor->_timer->CCMR2 |= (0b011 << TIM_CCMR2_OC4M_Pos);
-//        motor->_timer->CCER |= TIM_CCER_CC4E;
-//        break;
-//
-//    default:
-//        break;
-//    }
+//    motor->_position += dir ? -1 : 1;
 //}
-
-/**
- * DEFUNCT
- */
-//void A4988_IRQ_Handler(A4988_t* motor)
-//{
-//
-//	//Check that it was our clock cycle that called interrupt
-//	if(!(motor->_timer->SR & TIM_SR_CC1IF)) return;
-//	motor->_timer->SR &=~ TIM_SR_CC1IF;
-//
-//
-//	uint16_t arr = 0;
-//	switch(A4988_getState(motor)){
-//	case RUNNING:
-//
-//		//Adding for continuous speed mode
-//		//This mode still uses running/stabilizing states but should only ever be left running
-//		if(A4988_getMode(motor) == CONTINUOUS_SPEED){
-//			if(A4988_getDir(motor) == FORWARD){
-//				motor->_position++;
-//			}
-//			else{
-//				motor->_position--;
-//			}
-//			return;
-//		}
-//
-//		//If we still have steps to take, update position and check what sub state we are in
-//		if(motor->_stepsRemaining > 0){
-//			motor->_stepsRemaining--;
-//			if(A4988_getDir(motor) == FORWARD){
-//				motor->_position++;
-//			}
-//			else{
-//				motor->_position--;
-//			}
-//
-//			//Determine motion sub-state (accel, cruise, decel)
-//			switch(A4988_getMotionState(motor)){
-//			case ACCEL:
-//				motor->_accelSteps--;
-//				if(motor->_accelSteps == 0 && motor->_cruiseSteps == 0){
-//					motor->_speedProfile._motionState = DECEL;
-//				}
-//				else if (motor->_accelSteps == 0){
-//					motor->_speedProfile._motionState = CRUISE;
-//					arr = _A4988_computeArrFromRPM(motor, motor->_rpm);
-//					_A4988_setARR(motor, arr);
-//				}
-//				else{
-//					arr = _A4988_computeArrFromSpS2(motor, (motor->_totalSteps - motor->_stepsRemaining), motor->_speedProfile._accelRate);
-//					_A4988_setARR(motor, arr);
-//				}
-//				break;
-//
-//			case DECEL:
-//				motor->_decelSteps--;
-//				arr = _A4988_computeArrFromSpS2(motor, motor->_stepsRemaining, motor->_speedProfile._decelRate);
-//				_A4988_setARR(motor, arr);
-//
-//				break;
-//
-//			case CRUISE:
-//				if(motor->_stepsRemaining == motor->_decelSteps){
-//					motor->_speedProfile._motionState = DECEL;
-//				}
-//				break;
-//			}
-//
-//		}
-//		//No steps remain, reset to idle
-//		else{
-//			_A4988_stop(motor);
-//		}
-//		break;
-//
-//	case STABILIZING:
-//		//Waiting for dir pin to stabilize
-//		if(motor->_stabilizeCounter > 0) motor->_stabilizeCounter--;
-//		else
-//		{
-//			motor->_state = RUNNING;
-//			//Enable Output Compare Mode
-//			if(motor->_timerChannel == 1)      motor->_timer->CCMR1 |= TIM_CCMR1_OC1M_2;
-//			else if(motor->_timerChannel == 2) motor->_timer->CCMR1 |= TIM_CCMR1_OC2M_2;
-//			else if(motor->_timerChannel == 3) motor->_timer->CCMR2 |= TIM_CCMR2_OC3M_2;
-//			else if(motor->_timerChannel == 4) motor->_timer->CCMR2 |= TIM_CCMR2_OC4M_2;
-//		}
-//		break;
-//	}
-//}
-

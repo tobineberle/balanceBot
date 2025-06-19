@@ -59,6 +59,7 @@
 /* External variables --------------------------------------------------------*/
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
+extern volatile uint32_t irq_counter;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -208,7 +209,24 @@ void TIM2_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM2_IRQn 0 */
 	A4988_IRQ_Handler(&motA);
-
+//    if (!(motA._timer->SR & TIM_SR_UIF)) return;
+//    motA._timer->SR &= ~TIM_SR_UIF;
+//    motA._totalSteps += 1;
+//
+//    if (motA._position == 0) return;
+//
+//    bool dir = (motA._position> 0);
+//    motA._position   += dir ? 1 : -1;
+//
+//    // DIR setup
+//    motA._dirPort->ODR = (motA._dirPort->ODR & ~motA._dirPin) |
+//                           (dir ? motA._dirPin : 0);
+//
+//    // STEP pulse — keep high for ~1 µs
+//    motA._stepPort->BSRR = motA._stepPin;        // STEP HIGH
+//    __NOP(); __NOP(); __NOP(); __NOP(); __NOP();     // ~375 ns @ 16 MHz
+//    __NOP(); __NOP(); __NOP(); __NOP(); __NOP();
+//    motA._stepPort->BSRR = (uint32_t)motA._stepPin << 16;         // STEP LOW
 
   /* USER CODE END TIM2_IRQn 0 */
   HAL_TIM_IRQHandler(&htim2);
