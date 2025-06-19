@@ -173,9 +173,9 @@ void _MPU6050_init_kalman(MPU6050_t* mpu, float angle, float angle_covar, float 
 	mpu->kalmanFilter.kGain = 0;
 }
 
-float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity)
+float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_ms, float measuredAngle, float measuredVelocity)
 {
-	float t_s = (float)US_TO_S(t_us);
+	float t_s = (float)MS_TO_S(t_ms);
 	kalman1D_t* k = &(mpu->kalmanFilter);
 
 	/**
@@ -211,18 +211,18 @@ float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_us, float measuredAng
 	return k->angle;
 }
 
-float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_us){
-	float t_s = (float)US_TO_S(dt_us);
+float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_ms){
+	float t_s = (float)MS_TO_S(dt_ms);
 	return (float)(MPU6050_getGyroX(mpu) * t_s);
 }
 
-float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_us){
-	float t_s = (float)US_TO_S(dt_us);
+float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_ms){
+	float t_s = (float)MS_TO_S(dt_ms);
 	return (float)(MPU6050_getGyroY(mpu) * t_s);
 }
 
-float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_us){
-	float t_s = (float)US_TO_S(dt_us);
+float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_ms){
+	float t_s = (float)MS_TO_S(dt_ms);
 	return (float)(MPU6050_getGyroZ(mpu) * t_s);
 }
 

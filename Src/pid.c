@@ -72,9 +72,9 @@ void PID_reset(PID_t* pid){
 	pid->prevError = 0;
 }
 
-float PID_update(PID_t* pid, float currentVal, float t_us)
+float PID_update(PID_t* pid, float currentVal, float t_ms, float enableDFilter)
 {
-	float dt = US_TO_S(t_us);
+	float dt = MS_TO_S(t_ms);
 	float error= pid->target - currentVal;
 
 	//Proportional Term
@@ -82,11 +82,12 @@ float PID_update(PID_t* pid, float currentVal, float t_us)
 
 	//Integral Term
 	pid->integral += error * dt;
-	float i = pid ->integral;
+	float i = pid ->integral * pid->ki;
 	pid->integral *= I_DECAY_FACTOR;
 
 	//Derivative Term
 	float d = pid->kd * (error - pid->prevError) / dt;
+	if(enableDFilter) d = PID_lowPassFilter(d, pid->prevError, enableDFilter);
 	pid->prevError = error;
 
 	error = p + i + d;
@@ -95,3 +96,8 @@ float PID_update(PID_t* pid, float currentVal, float t_us)
 
 	return error;
 }
+
+float PID_lowPassFilter(float currVal, float prevVal, float alpha){
+	return prevVal + alpha * (currVal - prevVal);
+}
+

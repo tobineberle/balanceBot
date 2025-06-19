@@ -55,6 +55,7 @@
 #define KALMAN_SNOISE			1	//accelerometer error[deg]
 #define KALMAN_ANGULAR_COVAR 	1 	//Initial angular uncertainty
 #define US_TO_S(tus)			(tus/1000000.0f)
+#define MS_TO_S(tms)			(tms/1000.0f)
 #define G						9.80665	//[m/s^2/g]
 
 typedef enum {A2G, A4G, A8G, A16G} Accel_Resolution_e;
@@ -101,10 +102,10 @@ float MPU6050_getGyroZ(MPU6050_t* mpu);
 float MPU6050_getAccAngleDegX(MPU6050_t* mpu);
 float MPU6050_getAccAngleDegY(MPU6050_t* mpu);
 float MPU6050_getAccAngleDegZ(MPU6050_t* mpu);
-float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_us);
-float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_us);
-float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_us);
-float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_us, float measuredAngle, float measuredVelocity);
+float MPU6050_getGyroAngleDegX(MPU6050_t* mpu, uint16_t dt_ms);
+float MPU6050_getGyroAngleDegY(MPU6050_t* mpu, uint16_t dt_ms);
+float MPU6050_getGyroAngleDegZ(MPU6050_t* mpu, uint16_t dt_ms);
+float MPU6050_getKalmanAngleDeg(MPU6050_t* mpu, uint16_t t_ms, float measuredAngle, float measuredVelocity);
 
 //Private
 void _MPU6050_init_kalman(MPU6050_t* mpu, float angle, float angle_covar, float p_noise, float s_noise);

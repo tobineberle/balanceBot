@@ -56,6 +56,9 @@ TIM_HandleTypeDef htim3;
 A4988_t motA;
 A4988_t motB;
 MPU6050_t mpu;
+PID_t pid;
+volatile uint32_t irq_counter = 0;
+
 
 /* USER CODE END PV */
 
@@ -67,6 +70,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+void I2C1_RESET(I2C_HandleTypeDef* hi2cx);
 
 /* USER CODE END PFP */
 
@@ -110,71 +114,81 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
-  //Motor Configuration
-  A4988_init(&motA, GPIOA, GPIO_PIN_4, LINEAR_SPEED);
-  A4988_timer_init(&motA, TIM2, 1, TIM2_IRQn, HAL_RCC_GetPCLK1Freq());
-  A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);   A4988_setMicrostepResolution(&motA, QUARTER);
-  A4988_setRPM(&motA, 80);
-  A4988_init(&motB, GPIOC, GPIO_PIN_1, LINEAR_SPEED);
-  A4988_timer_init(&motB, TIM3, 1, TIM3_IRQn, HAL_RCC_GetPCLK1Freq());   A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
-  A4988_setMicrostepResolution(&motB, QUARTER);
-  A4988_setRPM(&motB, 80);
+  //Motor Init
+  A4988_init(&motA, GPIOA, GPIO_PIN_4, STEP_QUEUE);
+  A4988_StepQ_timer_init(&motA, TIM2, TIM2_IRQn, HAL_RCC_GetPCLK1Freq(), 100, GPIOA, GPIO_PIN_0);
+  A4988_microstepping_init(&motA, GPIOC, GPIO_PIN_10, GPIOC, GPIO_PIN_11, GPIOC, GPIO_PIN_12);
+  A4988_setMicrostepResolution(&motA, SIXTEENTH);
 
-  //MPU Configuration
+  A4988_init(&motB, GPIOC, GPIO_PIN_1, STEP_QUEUE);
+  A4988_StepQ_timer_init(&motB, TIM3, TIM3_IRQn, HAL_RCC_GetPCLK1Freq(), 100, GPIOA, GPIO_PIN_6);
+  A4988_microstepping_init(&motB, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, GPIOB, GPIO_PIN_6);
+  A4988_setMicrostepResolution(&motB, SIXTEENTH);
+
+  //MPU Init
+  I2C1_RESET(&hi2c1);
   MPU6050_init(&mpu, &hi2c1, A2G, G250DPS);
-  uint16_t t_us;
-  float y_angle;
-  float y_angle_gyro = 0;
-  float kal_angle;
 
-   //Start timer 1
-//   HAL_TIM_Base_Start(&htim1);
-
-//	HAL_TIM_Base_Start(&htim1);
-
-  for(int i = 0; i < 3; i++){
-	   printf("\nLOOP %d\n", i);
-//	   	   __HAL_TIM_SET_COUNTER(&htim1, 0);
-	   A4988_move(&motA, -200);
-	   A4988_move(&motB, -200);
-	   HAL_Delay(5000);
-	   A4988_move(&motA, 400);
-	   A4988_move(&motB, 400);
-//		   printf("RUN: %u\n",__HAL_TIM_GET_COUNTER(&htim1));
-	   HAL_Delay(5000);
-	   A4988_move(&motA, 800);
-	   A4988_move(&motB, 800);
-	   HAL_Delay(5000);
-   }
-  A4988_run(&motA, 0);
-  A4988_run(&motB, 0);
-
-  while(1){
-
-   }
-
-//   while(1){
-//	   printf("%i", A4988_getState(&motA));
-//	   A4988_run(&motB, 800);
-//	   y_angle = MPU6050_getAccAngleDegY(&mpu);
-//	   t_us = __HAL_TIM_GET_COUNTER(&htim1);
-//	   y_angle_gyro += MPU6050_getGyroAngleDegX(&mpu, t_us);
-//	   kal_angle = MPU6050_getKalmanAngleDeg(&mpu, t_us, y_angle, MPU6050_getGyroX(&mpu));
-//	   __HAL_TIM_SET_COUNTER(&htim1, 0);
-//	   printf("%f,%f,%f\n",y_angle, y_angle_gyro, kal_angle);
-//	   HAL_Delay(5000);
-//	   A4988_run(&motA, 400);
-//	   HAL_Delay(5000);
-//    }
-
+  //PID Init
+  //target, kp, ki, kd, -lim, + lim
+  PID_init(&pid, 0, 0.24, 0, 0.048, -40, 40);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
+  uint32_t tick = HAL_GetTick();
+  float accumulator = 0;
+  float prev_output = 0;
+  float output = 0;
 
+  printf("Kalman Angle, PID Output, Accumulator\n");
+	  while (1)
+	  {
+		  //1Hz => 10000 IRQ calls
+		  //Need at least 100Hz for good response time
+		  float now_tick = HAL_GetTick();
+		  uint32_t loop_time =  now_tick - tick;
+		  if(loop_time >= 5){
+			  //Time updates
+			  tick = now_tick;
+
+			  //MPU updates
+			  float y_angle = MPU6050_getAccAngleDegY(&mpu);
+			  float pitch = MPU6050_getGyroX(&mpu);
+			  float kalman_angle = MPU6050_getKalmanAngleDeg(&mpu, loop_time, y_angle, pitch);
+
+			#if 1
+			  /**
+			   * Added d error filter to PID
+			   */
+			  //PID updates, scale using PID in init
+			  output += PID_update(&pid, kalman_angle, loop_time, 0.1);
+			  int32_t steps = (int32_t)output;
+			  output -= steps;
+			  printf("%.4f, %.4f\n", kalman_angle, output);
+			  A4988_queueSteps(&motA, steps);
+			  A4988_queueSteps(&motB, steps);
+			#endif
+
+			#if 0
+			  /**
+			   * Low pass filter testing
+			   */
+			  //Removed Low pass filter for now
+			  output = PID_update(&pid, kalman_angle, loop_time);
+			  accumulator += PID_lowPassFilter(output, prev_output, 0.3);
+			  prev_output = output;
+			  //Ensure motor steps are full int
+			  int32_t steps = (int32_t)accumulator;
+			  //Logging
+			  printf("%.4f, %.4f, %.4f\n", kalman_angle, output, accumulator);
+			  accumulator -= steps;
+			  A4988_queueSteps(&motA, steps);
+			  A4988_queueSteps(&motB, steps);
+			#endif
+		  }
+
+    /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -274,7 +288,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 15;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -315,13 +329,12 @@ static void MX_TIM2_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 15;
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -335,28 +348,15 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -374,13 +374,12 @@ static void MX_TIM3_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 15;
+  htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -394,28 +393,15 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_OC_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
-  HAL_TIM_MspPostInit(&htim3);
 
 }
 
@@ -440,7 +426,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_12, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
@@ -452,8 +438,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA1 PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_4;
+  /*Configure GPIO pins : PA0 PA1 PA4 PA6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -472,6 +458,27 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void I2C1_RESET(I2C_HandleTypeDef* hi2cx){
+	HAL_StatusTypeDef conn = HAL_I2C_IsDeviceReady(hi2cx, (MPU6050_ADDRESS <<1) + 0, 1, 100);
+	if (conn != HAL_OK){
+		HAL_I2C_DeInit(hi2cx);
+		GPIO_InitTypeDef GPIO_InitStruct = {0};
+		GPIO_InitStruct.Pin = GPIO_PIN_8;
+		GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+		GPIO_InitStruct.Pull = GPIO_NOPULL;
+		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+		HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+		for(int i = 0; i < 10; i ++){
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+			HAL_Delay(20);
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+			HAL_Delay(20);
+		}
+		MX_I2C1_Init();
+	}
+}
+
 
 /* USER CODE END 4 */
 
