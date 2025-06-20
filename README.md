@@ -21,7 +21,7 @@ A quick summary of the parts used. Consumables such as wires and screws are not 
 ### **Results**
 You don't need to scroll all the way down, here is a gif of the robot doing a happy little balancing dance:
 
-![Robot](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExODltYWx0d3BrdXNhM3NpamQ5YzMxbTVwcHpubDh2dzR6ZjBmNzZ2YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/pzAhadGh9FAVEzXJb6/giphy.gif)
+![Robot](./media/robot.gif)
 
 From stress testing it can balance for over five minutes. This is the cutoff where the motors are too hot and the frame begins to melt. It has good setpoint tracking with only minor oscillation and good disturbance rejection (not demonstrated in gif).
 
