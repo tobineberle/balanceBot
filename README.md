@@ -168,7 +168,7 @@ The low pass filter is used to smooth an output based on previous input data. It
 
 ### **A4988 Library**
 
-I wrote an A4988 C library for the STM32F401RE and this helped me get a really good basis of state-based programming, timer setup, and interrupt handling. This was the final piece after implementing the previous two libraries and I thought it would keep going quickly! I was devistatingly wrong. I spent a lot of time troubleshooting and reading through some other peoples work online. Specifically the following mentions:
+I wrote an A4988 C library for the STM32F401RE and this helped me get a really good basis of state-based programming, timer setup, and interrupt handling. This was the final piece after implementing the previous two libraries and I thought it would keep going quickly! I was devistatingly wrong. Writing non-blocking motor control code was incredibly tedious, and I spent a lot of time troubleshooting and reading through some other peoples work online. Specifically the following mentions:
 
 [Laurb9's Arduino Cpp Code](https://github.com/laurb9/StepperDriver)
 
